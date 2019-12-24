@@ -47,12 +47,10 @@ class BaseValidator(object):
     A general validator to validate a single row (by validating its fields
     and perform row checks), perform final checks when done with all rows
     and finally release all resources required to do that.
-
     The :py:attr:`~.location` has to be set by descendants. While
     :py:meth:`~.validate_row` takes care of advancing the cell, descendants
     are responsible for advancing the row (by calling
     :py:meth:`cutplace.errors.Location.advance_line`).
-
     It also provides a context manager and can consequently be used with the
     ``with`` statement.
     """
@@ -82,7 +80,6 @@ class BaseValidator(object):
     def cid(self):
         """
         The CID to validate the data.
-
         :rtype: cutplace.interface.Cid
         """
         return self._cid
@@ -91,15 +88,13 @@ class BaseValidator(object):
     def location(self):
         """
         The current location in the data to validate.
-
         :rtype: cutplace.errors.Location
         """
         return self._location
 
-    def validate_row(self, row):
+    def validate_row(self, row, error_list=[]):
         """
         Validate a single ``row``:
-
         1. Check if the number of items in ``row`` matches the number of
            fields in the CID
         2. Check that all fields conform to their field format (as defined
@@ -107,7 +102,6 @@ class BaseValidator(object):
            descendants)
         3. Check that the row conforms to all row checks (as defined by
            :py:meth:`cutplace.checks.AbstractCheck.check_row`)
-
         The caller is responsible for :py:attr:`~.location` pointing to the
         correct row in the data while ``validate_row`` takes care of calling
         :py:meth:`cutplace.errors.Location.set_cell` appropriately.
@@ -118,31 +112,39 @@ class BaseValidator(object):
         # Validate that number of fields.
         actual_item_count = len(row)
         if actual_item_count < self._expected_item_count:
-            raise errors.DataError(
-                'row must contain %d fields but only has %d: %s'
-                % (self._expected_item_count, actual_item_count, row),
-                self.location)
-        if actual_item_count > self._expected_item_count:
-            raise errors.DataError(
-                'row must contain %d fields but has %d, additional values are: %s'
-                % (self._expected_item_count, actual_item_count, row[self._expected_item_count:]),
-                self.location)
+            error_list.append({'type': 'error',
+                    'col_idx': 0,
+                    'row_idx': 0,
+                    'cell': "",
+                    'value': "",
+                    'reason': "It seems like you have added/removed some columns. Re-upload without making changes to the column structure"})
+        
+            # raise errors.DataError(
+            #     'row must contain %d fields but only has %d: %s'
+            #     % (self._expected_item_count, actual_item_count, row),
+            #     self.location)
+        # if actual_item_count > self._expected_item_count:
+        #     raise errors.DataError(
+        #         'row must contain %d fields but has %d, additional values are: %s'
+        #         % (self._expected_item_count, actual_item_count, row[self._expected_item_count:]),
+        #         self.location)
 
         # Validate each field according to its format.
-        for field_index, field_value in enumerate(row):
-            self.location.set_cell(field_index)
-            field_to_validate = self.cid.field_formats[field_index]
-            try:
-                if not isinstance(field_value, six.text_type):
-                    raise errors.FieldValueError(
-                        'type must be %s instead of %s: %s'
-                        % (six.text_type.__name__, type(field_value).__name__, _compat.text_repr(field_value)))
-                field_to_validate.validated(field_value)
-            except errors.FieldValueError as error:
-                error.prepend_message(
-                    'cannot accept field %s' % _compat.text_repr(field_to_validate.field_name), self.location)
-                raise
-
+        # for field_index, field_value in enumerate(row):
+        #     self.location.set_cell(field_index)
+        #     field_to_validate = self.cid.field_formats[field_index]
+        #     try:
+        #         if not isinstance(field_value, six.text_type):
+        #             raise errors.FieldValueError(
+        #                 'type must be %s instead of %s: %s'
+        #                 % (six.text_type.__name__, type(field_value).__name__, _compat.text_repr(field_value)))
+        #         field_to_validate.validated(field_value)
+        #     except errors.FieldValueError as error:
+        #         #error.prepend_message('cannot accept field %s' % _compat.text_repr(field_to_validate.field_name), self.location)
+        #         error_list.append({'type': 'error',
+        #                             'cell': get_formatted_cell_location(self.location),
+        #                             'value': str(field_value) or 'NA',
+        #                             'reason': str(error.message)})
         # Validate the whole row according to row checks.
         self.location.set_cell(0)
         field_map = _create_field_map(self.cid.field_names, row)
@@ -153,7 +155,6 @@ class BaseValidator(object):
         """
         Validate final checks and release all resources. When called a second
         time, do nothing.
-
         :raises cutplace.errors.CheckError: if any \
           :py:meth:`cutplace.checks.AbstractCheck.check_at_end` fails.
         """
@@ -172,14 +173,11 @@ class Reader(BaseValidator):
         """
         An iterator that produces possibly validated rows from
         ``source_data_stream_or_path`` conforming to ``cid_or_path``.
-
         If a row cannot be read, ``on_error`` specifies what to do about it:
-
         * ``'continue'``: quietly continue with the next row.
         * ``'raise'`` (the default): raise an exception and stop reading.
         * ``'yield'``: instead of of a row, the result contains a \
           :py:exc:`cutplace.errors.DataError`.
-
         :param validate_until: number of rows after which validation should \
           stop; further rows are still produces but not validated anymore; \
           ``None`` all rows should be validated (the default); 0 means no \
@@ -230,13 +228,11 @@ class Reader(BaseValidator):
     def rows(self):
         """
         Data rows of ``source_path``.
-
         Even with ``on_error`` set to ' continue'  or 'yield' certain errors
         still cause a stop, for example checks at the end of the file still
         raise a :py:exc:`cutplace.errors.CheckError` and generally broken
         files result in a
         :py:exc:`cutplace.errors.DataFormatError`.
-
         :raises cutplace.errors.DataError: on broken data
         """
         self.accepted_rows_count = 0
@@ -250,9 +246,13 @@ class Reader(BaseValidator):
                 is_before_validate_until = (self._validate_until is None) or (row_count <= self._validate_until)
                 if is_after_header_row:
                     if is_before_validate_until:
-                        self.validate_row(row)
+                        error_list = []
+                        self.validate_row(row, error_list)
                     self.accepted_rows_count += 1
-                    yield row
+                    if error_list:
+                        yield error_list
+                    else:
+                        yield []
             except errors.DataError as error:
                 if self.on_error == 'raise':
                     raise
@@ -268,10 +268,8 @@ class Reader(BaseValidator):
         Validate that the data read from
         :py:meth:`~cutplace.validio.Reader.rows()` conform to
         :py:attr:`~cutplace.validio.Reader.cid`.
-
         In order to check everything, :py:meth:`~.Reader.close()` has to be
         called to also validate the checks at the end of the data.
-
         :raises cutplace.errors.DataError: on broken data
         """
         for _ in self.rows():
@@ -350,7 +348,6 @@ class Writer(BaseValidator):
 def rows(cid_or_path, data_stream_or_path, on_error='raise', validate_until=None):
     """
     Rows read from ``data`` and validated against ``cid_or_path``.
-
     :param cid_or_path: :py:class:`cutplace.Cid` or :py:class:`str` \
       describing a path pointing to a CID
     :param data_stream_or_path: filelike object or :py:class:`str` \
@@ -375,7 +372,6 @@ def rows(cid_or_path, data_stream_or_path, on_error='raise', validate_until=None
 def validate(cid_or_path, data_stream_or_path, validate_until=None):
     """
     Validate that ``data_or_path`` conform to ``cid_or_path``.
-
     :param cid_or_path: :py:class:`cutplace.Cid` or :py:class:`str` \
       describing a path pointing to a CID
     :param data_stream_or_path: filelike object or :py:class:`str` \
@@ -393,3 +389,14 @@ def validate(cid_or_path, data_stream_or_path, validate_until=None):
             rows_to_validate = itertools.islice(rows_to_validate, validate_until)
         for _ in rows_to_validate:
             pass
+
+def get_formatted_cell_location(location):
+    formatted_location_str = ""
+    try:
+        formatted_location_str = str(location).split()[1]
+        formatted_location_str = formatted_location_str.replace('(', '')
+        formatted_location_str = formatted_location_str.replace(')', '')
+    except Exception:
+        pass
+    return formatted_location_str
+
